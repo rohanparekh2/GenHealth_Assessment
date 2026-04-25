@@ -1,18 +1,28 @@
+import os
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
 
 import models
 from db import Base, SessionLocal, engine
 from routes.orders import router as orders_router
-from services.pdf_parser import extract_patient_fields, extract_text_from_pdf
+from services.upload_service import process_upload
 
 
 app = FastAPI(title="Orders API")
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "https://genhealth-assessment-1.onrender.com"
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -43,6 +53,7 @@ def on_startup():
 
 
 app.include_router(orders_router)
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 @app.get("/health", tags=["health"])
@@ -58,62 +69,13 @@ def upload_pdf(file: UploadFile = File(...)):
     pdf_bytes = file.file.read()
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(pdf_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 20MB limit")
 
     try:
-        extracted_text = extract_text_from_pdf(pdf_bytes)
+        return process_upload(pdf_bytes)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {exc}") from exc
-
-    parsed_fields = extract_patient_fields(extracted_text)
-    response = {
-        "first_name": parsed_fields.get("first_name"),
-        "last_name": parsed_fields.get("last_name"),
-        "date_of_birth": parsed_fields.get("date_of_birth"),
-    }
-    if not all([response["first_name"], response["last_name"], response["date_of_birth"]]):
-        response["raw_text_preview"] = parsed_fields.get("raw_text_preview")
-        response["created"] = False
-        response["reason"] = "Could not extract all required patient fields from PDF."
-        return response
-
-    dob_raw = str(response["date_of_birth"])
-    dob_value = None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%d-%m-%Y", "%m/%d/%y", "%d/%m/%y", "%m-%d-%y", "%d-%m-%y"):
-        try:
-            dob_value = datetime.strptime(dob_raw, fmt).date()
-            break
-        except ValueError:
-            continue
-
-    if dob_value is None:
-        response["created"] = False
-        response["reason"] = f"Extracted date_of_birth '{dob_raw}' is not in a supported format."
-        return response
-
-    db = SessionLocal()
-    patient_id = None
-    try:
-        patient = models.Order(
-            patient_first_name=str(response["first_name"]),
-            patient_last_name=str(response["last_name"]),
-            date_of_birth=dob_value,
-        )
-        db.add(patient)
-        db.commit()
-        db.refresh(patient)
-        db.add(
-            models.SystemLog(
-                action="UPLOAD_PDF",
-                entity_id=patient.id,
-                message=f"Imported patient {patient.patient_first_name} {patient.patient_last_name} from PDF",
-            )
-        )
-        db.commit()
-        patient_id = patient.id
-    finally:
-        db.close()
-
-    return {**response, "id": patient_id, "created": True}
 
 
 @app.get("/logs", tags=["logs"])
