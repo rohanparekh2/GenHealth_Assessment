@@ -61,6 +61,28 @@ export function CreateOrderForm({
       });
 
       if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        const detail = errorBody?.detail;
+
+        if (Array.isArray(detail)) {
+          const futureDobError = detail.find(
+            (item: { loc?: unknown[]; msg?: string }) =>
+              Array.isArray(item?.loc) &&
+              item.loc.includes("date_of_birth") &&
+              typeof item.msg === "string" &&
+              item.msg.toLowerCase().includes("future")
+          );
+          if (futureDobError) {
+            throw new Error(
+              '{"error":"Invalid date_of_birth","message":"Date of birth cannot be in the future"}'
+            );
+          }
+        }
+
+        if (typeof detail === "string") {
+          throw new Error(detail);
+        }
+
         throw new Error(`${editingPatient ? "Save" : "Create"} failed (${response.status})`);
       }
 
