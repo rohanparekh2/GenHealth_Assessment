@@ -82,32 +82,6 @@ def extract_patient_fields(raw_text: str) -> dict:
             date_of_birth = match.group(1).strip()
             break
 
-    if not date_of_birth:
-        fallback_dob_patterns = [
-            r"\b([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{4})\b",
-            r"\b([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{2})\b",
-            r"\b(\d{4}[\/\-][0-1]?\d[\/\-][0-3]?\d)\b",
-            r"\b([a-z]{3,9}\s+\d{1,2},?\s+\d{4})\b",
-        ]
-        for pattern in fallback_dob_patterns:
-            fallback_dob = re.search(
-                pattern,
-                normalized_text,
-                flags=re.IGNORECASE,
-            )
-            if fallback_dob:
-                date_of_birth = fallback_dob.group(1).strip()
-                break
-
-    if not date_of_birth:
-        # Some documents use "Date: mm/dd/yy" near patient demographics.
-        contextual_date_match = re.search(
-            r"(?i)\b(?:patient name|date of birth|birth date).{0,120}\bdate\b\s*[:\-]\s*([0-3]?\d[\/\-][0-3]?\d[\/\-](?:\d{2}|\d{4}))",
-            normalized_text,
-        )
-        if contextual_date_match:
-            date_of_birth = contextual_date_match.group(1).strip()
-
     global_comma_name_match = re.search(
         r"(?i)\b(?:patient name|patient information|patient info)\b\s*[:\-]?\s*([a-z'`\-]{2,})\s*,\s*([a-z'`\-]{2,})\b",
         normalized_text,
