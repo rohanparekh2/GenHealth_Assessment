@@ -73,9 +73,7 @@ export function CreateOrderForm({
               item.msg.toLowerCase().includes("future")
           );
           if (futureDobError) {
-            throw new Error(
-              '{"error":"Invalid date_of_birth","message":"Date of birth cannot be in the future"}'
-            );
+            throw new Error("Date of birth cannot be in the future.");
           }
         }
 
