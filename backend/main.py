@@ -72,17 +72,13 @@ def upload_pdf(file: UploadFile = File(...)):
     }
     if not all([response["first_name"], response["last_name"], response["date_of_birth"]]):
         response["raw_text_preview"] = parsed_fields.get("raw_text_preview")
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "Could not extract all required patient fields from PDF.",
-                "parsed": response,
-            },
-        )
+        response["created"] = False
+        response["reason"] = "Could not extract all required patient fields from PDF."
+        return response
 
     dob_raw = str(response["date_of_birth"])
     dob_value = None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%d-%m-%Y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%d-%m-%Y", "%m/%d/%y", "%d/%m/%y", "%m-%d-%y", "%d-%m-%y"):
         try:
             dob_value = datetime.strptime(dob_raw, fmt).date()
             break
@@ -90,10 +86,9 @@ def upload_pdf(file: UploadFile = File(...)):
             continue
 
     if dob_value is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Extracted date_of_birth '{dob_raw}' is not in a supported format.",
-        )
+        response["created"] = False
+        response["reason"] = f"Extracted date_of_birth '{dob_raw}' is not in a supported format."
+        return response
 
     db = SessionLocal()
     patient_id = None
@@ -118,7 +113,7 @@ def upload_pdf(file: UploadFile = File(...)):
     finally:
         db.close()
 
-    return {**response, "id": patient_id}
+    return {**response, "id": patient_id, "created": True}
 
 
 @app.get("/logs", tags=["logs"])

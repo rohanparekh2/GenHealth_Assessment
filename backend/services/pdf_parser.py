@@ -54,9 +54,25 @@ def extract_patient_fields(raw_text: str) -> dict:
     first_name = None
     last_name = None
     date_of_birth = None
+    blocked_name_terms = {
+        "number",
+        "phone",
+        "dob",
+        "date",
+        "birth",
+        "member",
+        "id",
+        "source",
+        "facility",
+        "record",
+        "information",
+        "medical",
+        "history",
+    }
 
     dob_patterns = [
         r"\b(?:patient date of birth|dob|date of birth|birth date|d\.o\.b\.)\b\s*[:\-]?\s*([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{4})",
+        r"\b(?:patient date of birth|dob|date of birth|birth date|d\.o\.b\.)\b\s*[:\-]?\s*([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{2})",
         r"\b(?:patient date of birth|dob|date of birth|birth date|d\.o\.b\.)\b\s*[:\-]?\s*(\d{4}[\/\-][0-1]?\d[\/\-][0-3]?\d)",
         r"\b(?:patient date of birth|dob|date of birth|birth date|d\.o\.b\.)\b\s*[:\-]?\s*([a-z]{3,9}\s+\d{1,2},?\s+\d{4})",
     ]
@@ -69,6 +85,7 @@ def extract_patient_fields(raw_text: str) -> dict:
     if not date_of_birth:
         fallback_dob_patterns = [
             r"\b([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{4})\b",
+            r"\b([0-3]?\d[\/\-][0-3]?\d[\/\-]\d{2})\b",
             r"\b(\d{4}[\/\-][0-1]?\d[\/\-][0-3]?\d)\b",
             r"\b([a-z]{3,9}\s+\d{1,2},?\s+\d{4})\b",
         ]
@@ -82,39 +99,81 @@ def extract_patient_fields(raw_text: str) -> dict:
                 date_of_birth = fallback_dob.group(1).strip()
                 break
 
-    for line in raw_lines:
-        match = re.search(
-            r"(?i)\b(?:patient name|full name|name)\b\s*[:\-]\s*([a-z'`\-]+(?:\s+[a-z'`\-]+){1,2})\b",
-            line,
+    if not date_of_birth:
+        # Some documents use "Date: mm/dd/yy" near patient demographics.
+        contextual_date_match = re.search(
+            r"(?i)\b(?:patient name|date of birth|birth date).{0,120}\bdate\b\s*[:\-]\s*([0-3]?\d[\/\-][0-3]?\d[\/\-](?:\d{2}|\d{4}))",
+            normalized_text,
         )
-        if match:
-            first_name, last_name = _split_name(match.group(1))
-            if first_name and last_name:
-                break
+        if contextual_date_match:
+            date_of_birth = contextual_date_match.group(1).strip()
 
-    labeled_name_patterns = [
-        r"\b(?:patient name|full name|name)\b\s*[:\-]\s*([a-z'`\-]+(?:\s+[a-z'`\-]+){1,2})\b",
-    ]
-    for pattern in labeled_name_patterns:
+    global_comma_name_match = re.search(
+        r"(?i)\b(?:patient name|patient information|patient info)\b\s*[:\-]?\s*([a-z'`\-]{2,})\s*,\s*([a-z'`\-]{2,})\b",
+        normalized_text,
+    )
+    if global_comma_name_match:
+        candidate_last = global_comma_name_match.group(1).strip()
+        candidate_first = global_comma_name_match.group(2).strip()
+        if candidate_first not in blocked_name_terms and candidate_last not in blocked_name_terms:
+            last_name = candidate_last
+            first_name = candidate_first
+
+    for line in raw_lines:
         if first_name and last_name:
             break
-        match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
-        if match:
-            first_name, last_name = _split_name(match.group(1))
-            if first_name and last_name:
+        # Prefer explicit "Patient Name: Last, First" format.
+        comma_name_match = re.search(
+            r"(?i)\b(?:patient name|patient information|patient info)\b\s*[:\-]\s*([a-z'`\-]+)\s*,\s*([a-z'`\-]+)\b",
+            line,
+        )
+        if comma_name_match:
+            candidate_last = comma_name_match.group(1).strip()
+            candidate_first = comma_name_match.group(2).strip()
+            if candidate_first not in blocked_name_terms and candidate_last not in blocked_name_terms:
+                last_name = candidate_last
+                first_name = candidate_first
+                break
+
+        # Fallback to "Patient Name: First Last" format and stop before extra labels.
+        direct_name_match = re.search(
+            r"(?i)\b(?:patient name|patient information|patient info|full name|name)\b\s*[:\-]?\s*([a-z'`\-]+\s+[a-z'`\-]+)(?:\s+(?:birth date|date of birth|date|dob|phone|address|id)\b|$)",
+            line,
+        )
+        if direct_name_match:
+            candidate_first, candidate_last = _split_name(direct_name_match.group(1))
+            if (
+                candidate_first
+                and candidate_last
+                and candidate_first.lower() not in blocked_name_terms
+                and candidate_last.lower() not in blocked_name_terms
+            ):
+                first_name, last_name = candidate_first, candidate_last
                 break
 
     if not first_name or not last_name:
-        nearby_patient_name = re.search(
-            r"\bpatient(?:\s+name)?\b.{0,40}\b([a-z'`\-]{2,})\s+([a-z'`\-]{2,})\b",
+        # Support common pattern: "Patient Information John Doe Birth Date ..."
+        info_name_match = re.search(
+            r"(?i)\bpatient information\b\s*[:\-]?\s*([a-z'`\-]{2,})\s+([a-z'`\-]{2,})(?:\s+\b(?:birth date|date of birth|dob|date)\b)",
             normalized_text,
-            flags=re.IGNORECASE,
         )
-        if nearby_patient_name:
-            candidate_first = nearby_patient_name.group(1).strip()
-            candidate_last = nearby_patient_name.group(2).strip()
-            blocked_terms = {"number", "phone", "dob", "date", "birth", "member", "id"}
-            if candidate_first not in blocked_terms and candidate_last not in blocked_terms:
+        if info_name_match:
+            candidate_first = info_name_match.group(1).strip()
+            candidate_last = info_name_match.group(2).strip()
+            if candidate_first not in blocked_name_terms and candidate_last not in blocked_name_terms:
+                first_name = first_name or candidate_first
+                last_name = last_name or candidate_last
+
+    if not first_name or not last_name:
+        # Support "Patient Details:" followed by a name line.
+        details_name_match = re.search(
+            r"(?i)\bpatient details\b\s*[:\-]?\s*(?:\n|\s)+([a-z'`\-]{2,})\s+([a-z'`\-]{2,})(?:\s+\b(?:birth date|date of birth|dob|date)\b|$)",
+            raw_text or "",
+        )
+        if details_name_match:
+            candidate_first = details_name_match.group(1).strip().lower()
+            candidate_last = details_name_match.group(2).strip().lower()
+            if candidate_first not in blocked_name_terms and candidate_last not in blocked_name_terms:
                 first_name = first_name or candidate_first
                 last_name = last_name or candidate_last
 
