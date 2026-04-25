@@ -1,4 +1,5 @@
 import io
+import os
 import re
 
 import fitz
@@ -17,12 +18,16 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         if _is_valid_extracted_text(extracted_text):
             return extracted_text
 
+        ocr_dpi = int(os.getenv("OCR_DPI", "150"))
+        max_ocr_pages = int(os.getenv("MAX_OCR_PAGES", "4"))
         ocr_text_chunks = []
         try:
-            for page in doc:
-                pix = page.get_pixmap(dpi=300)
-                image = Image.open(io.BytesIO(pix.tobytes("png")))
-                ocr_text_chunks.append(pytesseract.image_to_string(image))
+            for page_index, page in enumerate(doc):
+                if page_index >= max_ocr_pages:
+                    break
+                pix = page.get_pixmap(dpi=ocr_dpi)
+                with Image.open(io.BytesIO(pix.tobytes("png"))) as image:
+                    ocr_text_chunks.append(pytesseract.image_to_string(image))
         except Exception:
             return extracted_text
         return "\n".join(ocr_text_chunks)

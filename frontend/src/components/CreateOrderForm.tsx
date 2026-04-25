@@ -5,7 +5,6 @@ import { CreateOrderRequest, Order, UpdateOrderRequest } from "../types";
 
 interface CreateOrderFormProps {
   editingPatient: Order | null;
-  prefill: Partial<CreateOrderRequest> | null;
   onSaved: () => void;
   onCancelEdit: () => void;
   onLog: (message: string) => void;
@@ -19,7 +18,6 @@ const initialForm: CreateOrderRequest = {
 
 export function CreateOrderForm({
   editingPatient,
-  prefill,
   onSaved,
   onCancelEdit,
   onLog,
@@ -40,14 +38,6 @@ export function CreateOrderForm({
       setError(null);
     }
   }, [editingPatient]);
-
-  useEffect(() => {
-    if (!prefill) return;
-    setForm((prev) => ({
-      ...prev,
-      ...prefill,
-    }));
-  }, [prefill]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

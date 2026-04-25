@@ -4,21 +4,15 @@ import { OrdersList } from "./components/OrdersList";
 import { SystemLogs } from "./components/SystemLogs";
 import { UploadPDF } from "./components/UploadPDF";
 import { API_BASE_URL } from "./config";
-import { CreateOrderRequest, Order, UploadResponse } from "./types";
+import { Order, UploadResponse } from "./types";
 
 function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editingPatient, setEditingPatient] = useState<Order | null>(null);
-  const [prefill, setPrefill] = useState<Partial<CreateOrderRequest> | null>(null);
 
   const addLog = (_message: string) => {};
 
-  const handleExtract = (data: UploadResponse) => {
-    setPrefill({
-      patient_first_name: data.first_name ?? "",
-      patient_last_name: data.last_name ?? "",
-      date_of_birth: data.date_of_birth ?? "",
-    });
+  const handleExtract = (_data: UploadResponse) => {
     setRefreshKey((prev) => prev + 1);
   };
 
@@ -35,11 +29,9 @@ function App() {
           <UploadPDF onExtract={handleExtract} onLog={addLog} />
           <CreateOrderForm
             editingPatient={editingPatient}
-            prefill={prefill}
             onSaved={() => {
               setRefreshKey((prev) => prev + 1);
               setEditingPatient(null);
-              setPrefill(null);
             }}
             onCancelEdit={() => setEditingPatient(null)}
             onLog={addLog}
